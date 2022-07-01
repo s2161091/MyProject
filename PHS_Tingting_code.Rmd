@@ -1,0 +1,674 @@
+---
+title: "Untitled"
+author: "Tingting Li"
+date: '2022-06-13'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(data.table)
+
+wait.dt <- read.csv("sot_performance_ongoing_waits_dec21.csv")
+wait.dt <- wait.dt[order(wait.dt$MonthEnding), ]
+
+# change MonthEnding into date
+wait.dt$MonthEnding <- ymd(wait.dt[, 1])
+
+# the number of inpatient in all of the specialities
+inpatient.dt <- wait.dt[-which(wait.dt$HBT == "SB0801" | wait.dt$PatientType == "New Outpatient" | wait.dt$NumberWaitingQF == ":u"), ] %>% unite("Match", c("MonthEnding", "HBT", "Specialty"), sep="-", remove = F)
+```
+
+```{r}
+wait.scotland.all <- wait.dt[which(wait.dt$HBTQF == "d" & wait.dt$SpecialtyQF == "d"),]
+
+# change MonthEnding into date
+wait.scotland.all$MonthEnding <- ymd(wait.scotland.all[, 1])
+
+
+# number of inpatient
+wait.inpatient <- wait.scotland.all[which(wait.scotland.all$PatientType == "Inpatient/Day case"),]
+
+
+
+# visualization the number of inpatient waiting people
+p1 <- ggplot()+
+      geom_line(data = wait.inpatient, 
+                aes(x = MonthEnding, y = NumberWaiting, 
+                    colour = "Total admissions"), size=1)+
+      theme_bw() + 
+      scale_x_date(date_breaks = "12 months", 
+                   date_labels = "%b-%y") +
+      labs(x = "Month ending", y = "number admitted", 
+           title = "Number of patients admitted as an inpatient or day case",
+           subtitle = "PHSScotland, 31 October 2012 to 31 December 2021")+
+        theme(legend.position = "none",
+              panel.grid.major.x=element_blank(),
+              panel.grid.minor.x=element_blank(),
+              panel.border = element_blank())
+
+
+p1  
+```
+
+```{r}
+# delete the groups of HBTs and specialties that don't exist in inpatient.dt
+inpatient1.dt <- inpatient.dt[, -1] %>% unite("Match", c("HBT", "Specialty"), sep="-", remove = F)
+
+inpatient1.dt <- inpatient1.dt[order(inpatient1.dt$Match),]
+
+
+
+# delete the groups with all NAs
+HBT.specialty.count <- unique(inpatient1.dt$Match)
+HBT.specialty.No <- length(HBT.specialty.count)
+
+a <- NULL
+for (i in 1:HBT.specialty.No) {
+ ind.group <- which(inpatient1.dt$Match == HBT.specialty.count[i])
+ MissValue <- which(is.na(inpatient1.dt$NumberWaiting[ind.group]))
+ if(length(MissValue) == length(ind.group)){
+   a <- c(a, ind.group)
+ }
+}
+
+
+inpatient2.dt <- inpatient1.dt[-a, ] # get rid of all ":u" and all groups of HBTs and specialties with all NAs
+
+```
+
+```{r}
+# create a new data set including date, HB, specialty, and inpatient for adding missing dates and 0 to "inpatient"
+
+Match.count <- unique(inpatient2.dt$Match)  # what the groups of HBTs and specialties are
+date.count <- unique(inpatient2.dt$MonthEnding)
+
+Match.No <- length(Match.count)  # how many groups of HBTs and specialties
+date.No <- length(date.count)   # how many dates
+n <- Match.No
+
+MonthEnding <- rep(date.count, n)
+Match <- rep(Match.count, each = date.No)
+NumberWaiting <- rep(0, n*date.No)
+
+
+# create a data table for complementing 0 rows
+Add_0.dt <- data.table(MonthEnding, Match, NumberWaiting) %>% separate("Match", into = c("HBT", "Specialty"), sep = "-", remove = F) %>% unite("Match1", c("MonthEnding", "Match"), sep = "-", remove = F)
+
+
+Add_0.dt <- Add_0.dt[order(Match1)]
+inpatient3.dt <- unite(inpatient2.dt, "Match1", c("MonthEnding", "Match"), sep = "-", remove = F)
+inpatient3.dt <- inpatient3.dt[order(inpatient3.dt$Match1),]
+
+
+# find the indexes of Match in Add_0.dt are in inpatient.dt
+ind <- which(Add_0.dt$Match1 %in% inpatient3.dt$Match1)
+Add_0.dt$NumberWaiting[ind] <- inpatient3.dt$NumberWaiting
+
+Add_YMD.dt <- separate(data = Add_0.dt, col = MonthEnding, into = 
+c("Year", "month", "day"), sep = "-", remove = F)
+```
+
+```{r}
+#visualization of the ongoing data about different HBTs after complementing 0
+ongoing.Z9.HBT.dt <- Add_0.dt[which(Add_0.dt$Specialty == "Z9"), -c(1, 3)]
+ongoing.HBT.each.dt <- ongoing.Z9.HBT.dt[-which(ongoing.Z9.HBT.dt$HBT == "S92000003"),]
+
+
+
+p2 <- ggplot(data = ongoing.HBT.each.dt, aes(x = MonthEnding, y = NumberWaiting, group = HBT, color = HBT, shape = HBT))+
+      geom_line()+
+      labs(x = "Month ending", y = "number waiting", 
+           title = "Inpatients or Day cases in each HB",
+           subtitle = "PHSScotland, 31 October 2012 to 31 December 2021")+
+      theme_bw() +
+      scale_x_date(date_breaks = "9 months", 
+                   date_labels = "%b-%y") +
+      theme(legend.key.size = unit(10, "pt"),
+            axis.text.x = element_text(angle = 45,size=10),
+            panel.grid.major.x=element_blank(),
+            panel.grid.minor.x=element_blank(),
+            panel.border = element_blank()) 
+
+p2
+```
+
+```{r}
+#visualization of the ongoing data about different specialties after complementing 0 on 31 Dec 2021
+ongoing.all.2021.12.dt <- Add_0.dt[which(Add_0.dt$MonthEnding == "2021-12-31" & Add_0.dt$HBT == "S92000003"), -c(1, 3)]
+
+ongoing.each.specialty.dec.21.dt <- ongoing.all.2021.12.dt[-which(ongoing.all.2021.12.dt$Specialty == "Z9"),]
+
+p3 <- ggplot(ongoing.each.specialty.dec.21.dt, 
+             aes(x = Specialty, y = NumberWaiting, 
+                 fill = Specialty)) +
+      geom_bar(stat="identity") +
+      labs(x = "Specialty", y = "number waiting", 
+           title = "Inpatients or Day cases in each specialty",
+           subtitle = "Whole Scotland, by 31 December 2021")+
+      theme_bw() +
+      theme(legend.key.size = unit(8, "pt"),
+            axis.text.x = element_text(angle = 90,size = 8),
+            panel.grid.major.x=element_blank(),
+            panel.grid.minor.x=element_blank(),
+            panel.border = element_blank()) 
+p3
+```
+
+```{r}
+# add the percent of old people and female old people into inpatient
+pop.demo.dt <- read.csv("HBdemography.csv")   # the number of 1981-2020 population 
+pop.predict.dt <- read.csv("hb_pop_proj_03072020.csv")  # the number 2021-2043 population
+pop2012.dt <- rbind(pop.demo.dt[which(pop.demo.dt$Year>2011), -1], pop.predict.dt[which(pop.predict.dt$Year == 2021), ]) # the number of 2012-2021 population
+
+
+# the percent of old people (>=65)
+ageold <- apply(pop2012.dt[ ,72:97], 1, sum)
+ageold.prop <- ageold/pop2012.dt[, 6]
+
+
+# data table including the percentage of >=65
+pop2012.oldprop.dt <- data.table(pop2012.dt, ageold, ageold.prop)
+pop.all.oldprop.dt <- pop2012.oldprop.dt[which(pop2012.oldprop.dt$Sex == "All"), ]
+
+
+# the percentage of female old people over the whole old people each year and specialty
+pop.old.female.dt <- pop2012.oldprop.dt[which(pop2012.oldprop.dt$Sex == "Female"), ]
+female.old.prop <- pop.old.female.dt$ageold/pop.all.oldprop.dt$ageold
+pop.old.female.prop.dt <- data.table(pop.old.female.dt[, -99], female.old.prop)
+
+
+
+# add the percent of old people and female old people
+old.prop <- rep(0, nrow(Add_YMD.dt))
+F.old.prop <- rep(0, nrow(Add_YMD.dt))
+
+Add.old.dt <- data.table(Add_YMD.dt[, -c(1, 5, 6)], old.prop, F.old.prop) %>% unite("Match", c("Year", "HBT"), sep="-", remove = F)
+
+female.prop.dt <- unite(pop.old.female.prop.dt[, c(1, 2, 4, 99)], "Match", c("Year", "HB"), sep="-", remove = F)
+old.prop.dt <- unite(pop.all.oldprop.dt[, c(1, 2, 4, 99)], "Match", c("Year", "HB"), sep="-", remove = F)
+
+
+female.prop.dt <- female.prop.dt[order(Match)]
+old.prop.dt <- old.prop.dt[order(Match)]
+Add.old.dt <- Add.old.dt[order(Match)]
+
+
+
+for (i in 1:150) {
+  ind.female <- which(Add.old.dt$Match == female.prop.dt$Match[i])
+  ind.old <- which(Add.old.dt$Match == old.prop.dt$Match[i])
+  
+  Add.old.dt$F.old.prop[ind.female] <- female.prop.dt$female.old.prop[i]
+  Add.old.dt$old.prop[ind.old] <- old.prop.dt$ageold.prop[i]
+} 
+
+```
+
+```{r}
+pop.dt <- pop.demo.dt[which(pop.demo.dt$HBQF == "d"), -1]
+pop.predAll.dt <- pop.predict.dt[which(pop.predict.dt$Year >2020 & pop.predict.dt$HBQF == "d"), ]
+
+
+
+pop.gender.dt <- pop.dt[which(pop.dt$SexQF == "" & pop.dt$Year >2011), ]  # 2012-2020 population
+
+pop.gender.predict.dt <- pop.predAll.dt[-which(pop.dt$SexQF == "d"), ] # after 2021 population with prediction
+
+pop.gender.forecast.dt <- rbind(pop.gender.dt, pop.gender.predict.dt)  # 1981-2043 population
+  
+  
+
+# plot the histogram about the population of different genders
+
+
+p5 <- pop.gender.dt %>%
+      ggplot(aes(x = Year, y = AllAges/1e6, fill = Sex)) +
+      geom_bar(stat = "identity", alpha = 0.5, width = 0.6) +
+      scale_fill_brewer(palette="Paired") + 
+      theme_minimal()+
+      labs(y = "population in millions", 
+           title = "population demography")                                                                                       
+p5   # 2012-2020, the same year has been gathered waiting people  
+```
+
+```{r}
+library(forcats)
+# plot the distribution about the population of different ages
+
+pop.age.dt <- pop.dt[which(pop.dt$SexQF == "d" & pop.dt$Year >2011), ]  # 2012-2020 population both male and female
+
+
+ageGroup.number <- matrix(rep(0, 72), 9, 8)
+# calculate percentage of different age scales
+ageGroup.number[ ,1] <- apply(pop.age.dt[, 7:11], 1, sum) # percentage of people aged <5
+for (i in 2:7) {
+    j = 2+10*(i-1)
+    k = 1+10*i
+    ageGroup.number[ ,i] <- apply(pop.age.dt[ , j:k], 1, sum)
+} # # percentage of people aged "05-14", "15-24", "25-34", "35-44", "45-54", "55-64"
+  
+ageGroup.number[ , 8] <- apply(pop.age.dt[ ,72:97], 1, sum)
+
+Number <- as.vector(t(ageGroup.number))
+Year <- rep(pop.age.dt$Year, each = 8)
+ageGroup <- factor(rep(c("<5", "05-14", "15-24", "25-34", "35-44",
+                         "45-54", "55-64", "65+"), 9))
+
+age.dt <- data.table(Year, ageGroup, Number)
+
+
+p6 <- ggplot(age.dt, aes(x = Year, y = Number/1e6, 
+                     fill = forcats::fct_rev(ageGroup))) +
+      geom_area() +  
+      labs(title = "Population by age", 
+           subtitle = "2012 to 2020", x = "Year", 
+           y = "Population in millions", fill = "age Group") +
+      scale_fill_brewer(palette = "Set2") + # change color
+      theme_minimal()
+
+p6   
+```
+
+```{r}
+p9_1 <- ggplot(data = old.prop.dt, aes(x = Year, y = ageold.prop, group = HB, color = HB, shape = HB))+
+      geom_line()+
+      labs(x = "Year", y = "proportion", 
+           title = "the percentage of old people in each HB",
+           subtitle = "PHSScotland, 2012 to 2021")+
+      theme_bw() +
+      theme(legend.key.size = unit(15, "pt"),
+            panel.grid.major.x=element_blank(),
+            panel.grid.minor.x=element_blank(),
+            panel.border = element_blank()) 
+
+p9_1
+```
+
+```{r}
+p9_2 <- ggplot(data = female.prop.dt, aes(x = Year, y = female.old.prop, group = HB, color = HB, shape = HB))+
+      geom_line()+
+      labs(x = "Year", y = "proportion", 
+           title = "the percentage of female old people in each HB",
+           subtitle = "PHSScotland, 2012 to 2021")+
+      theme_bw() +
+      theme(legend.key.size = unit(15, "pt"),
+            panel.grid.major.x=element_blank(),
+            panel.grid.minor.x=element_blank(),
+            panel.border = element_blank()) 
+
+p9_2
+```
+
+```{r}
+# add urban fold8 into inpatient
+urban.dt <- read.csv("urban_rural.csv")
+urban.zone6.dt <- urban.dt[, c(2, 5)]  # choose fold 8
+urban.zone6.dt <- urban.zone6.dt[order(urban.zone6.dt$DataZone),]
+
+
+hospital.dt <- read.csv("hospital_codes.csv")
+hb_dz.dt <- hospital.dt[-which(hospital.dt$HB == "SB0802" | hospital.dt$HB == "SB0801"), c(6, 13)]
+hb_dz.dt <- hb_dz.dt[order(hb_dz.dt$DataZone),]
+
+urban1 <- urban.zone6.dt[which(urban.zone6.dt$DataZone %in% hb_dz.dt$DataZone), ]  # pick out rows including hb datazones from urban datazone
+
+folds <- rep(0, nrow(hb_dz.dt))
+hb.folds <- cbind(hb_dz.dt, folds)
+
+for (i in 1:nrow(hb_dz.dt)) {
+  ind1 <- which(urban1$DataZone == hb.folds$DataZone[i])
+  hb.folds$folds[i] <- urban1$UrbanRural6fold2016[ind1]
+}
+
+
+fold.mean <- tapply(hb.folds$folds,INDEX = hb.folds$HB,FUN = mean)
+
+
+Times.HBT <- Add.old.dt %>% count(HBT)
+n.HBT <- Times.HBT$n
+fold.zone <- c(rep(fold.mean, n.HBT[1:14]), rep(mean(fold.mean), n.HBT[15])) # treat folds as 0 when HBT="S92000003" 
+
+Add.zone.dt <- cbind(Add.old.dt[order(Add.old.dt$HBT), ], fold.zone)
+```
+
+```{r}
+# add the number of removals and additions into inpatient
+removal.dt <- read.csv("sot_removal_reasons_dec21.csv")
+removal.dt <- removal.dt[order(removal.dt$QuarterEnding), ]
+
+additions.removals.dt <- removal.dt[-which(removal.dt$PatientType == "New Outpatient" | removal.dt$HBT == "SB0801" | removal.dt$AdditionsQF == ":u"), 1:9]
+
+# change QuarterEnding into date
+additions.removals.dt$QuarterEnding <- ymd(additions.removals.dt[, 1])
+
+
+AR.dt <- unite(additions.removals.dt, "Match",c("QuarterEnding", "HBT","Specialty"), sep="-", remove = F)
+
+
+Additions <- rep(0, nrow(Add.zone.dt))
+Removals <- rep(0, nrow(Add.zone.dt))
+
+
+# use the average number of additions and removals in a quarter as the number of additions and removals in one month
+Qt <- quarters(Add.zone.dt$MonthEnding)
+Add.AR.dt <- cbind(Add.zone.dt[, -2], Qt, Additions, Removals) %>%
+            unite("Match1", c("Year", "HBT", "Specialty", "Qt"), sep="-", remove = F) %>%
+            unite("Match", c("MonthEnding", "HBT", "Specialty"), sep="-", remove = F)
+
+Add.AR.dt <- Add.AR.dt[order(Add.AR.dt$Match),]
+AR.dt <- AR.dt[order(AR.dt$Match),]
+
+AR_1.dt <- AR.dt[which(AR.dt$Match %in% Add.AR.dt$Match),]
+
+ind2 <- which(Add.AR.dt$Match %in% AR_1.dt$Match)
+Add.AR.dt$Additions[ind2] <- AR_1.dt$Additions
+Add.AR.dt$Removals[ind2] <- AR_1.dt$Removals
+
+Add.AR.dt <- Add.AR.dt[order(Add.AR.dt$Match1),]
+
+Add.AR.dt$Additions <- rep(tapply(Add.AR.dt$Additions,INDEX=Add.AR.dt$Match1,FUN=mean), each = 3)
+Add.AR.dt$Removals <- rep(tapply(Add.AR.dt$Removals,INDEX=Add.AR.dt$Match1,FUN=mean), each = 3)
+
+Model.dt <- Add.AR.dt[order(Add.AR.dt$Specialty, Add.AR.dt$HBT), -c(1, 3)]
+
+```
+
+```{r}
+# pick up the number of removals all specialities
+removal.all <- removal.dt[which(removal.dt$HBTQF == "d" & removal.dt$SpecialtyQF == "d"),]
+
+
+# change QuarterEnding into date
+removal.all$QuarterEnding <- ymd(removal.all[, 1])
+
+
+# removal number of inpatient
+removal.inpatient <- removal.all[which(removal.all$PatientType == "Inpatient/Day case"),]
+
+
+# visualization the number of inpatient waiting people
+p4 <- ggplot()+
+      geom_line(data = removal.inpatient, 
+                aes(x = QuarterEnding, y = Additions, 
+                    colour = "Additions"), size=1)+
+      geom_line(data = removal.inpatient,
+                aes(x = QuarterEnding,
+                    y = Removals,
+                    colour ="All Removals"), size=1) + 
+      geom_line(data = removal.inpatient,
+                aes(x = QuarterEnding,
+                    y = Attended,
+                    colour ="Attended"), size=1) +
+      scale_colour_manual("",values = c("Addition" = "black",
+                                        "All Removals" = "light blue",
+                                        "Attended" = "Orange")) +
+      theme_bw() + 
+      scale_x_date(date_breaks = "9 months", 
+                   date_labels = "%b-%y") +
+      labs(x = "Quarter ending", y = "total number of patients", 
+           title = "Number of additions and removals from the inpatient or day case waiting list",
+           subtitle = "PHSScotland, 31 December 2012 to 31 December 2021")+
+        theme(legend.position = "bottom",
+              panel.grid.major.x=element_blank(),
+              panel.grid.minor.x=element_blank(),
+              panel.border = element_blank())
+
+
+p4  
+```
+
+```{r}
+# impute missing values
+library(imputeTS)
+library(xts)
+# the missing values are only in HBT: S08000030 and S92000003
+
+Model.na.dt <- Model.dt[which(Model.dt$HBT == "S08000030" | Model.dt$HBT == "S92000003"), ] %>% unite("Match", c("HBT", "Specialty"), sep="-", remove = F)
+
+dat.spl <- split(Model.na.dt, Model.na.dt$Match)
+
+NW <- AN <- RN <- NULL
+for (i in 1:67) {
+  imp.na.dt <- dat.spl[[i]][, c(1, 7, 12, 13)]
+  imp.na_ts <- xts(imp.na.dt[, -1], order.by = imp.na.dt$MonthEnding)
+  imp.na_ts <- na.approx(imp.na_ts)
+  NW <- c(NW, imp.na_ts$NumberWaiting)
+  AN <- c(AN, imp.na_ts$Additions)
+  RN <- c(RN, imp.na_ts$Removals)
+}
+
+
+Model.na.dt <- Model.na.dt[order(Model.na.dt$Match),]
+Model.na.dt$NumberWaiting <- NW
+Model.na.dt$Additions <- AN
+Model.na.dt$Removals <- RN
+
+
+
+Model.dt <- rbind(Model.dt[-which(Model.dt$HBT == "S08000030" | Model.dt$HBT == "S92000003"), -3], Model.na.dt[, -c(3, 4)])
+
+str(Model.dt)
+```
+
+```{r}
+imp.Model.9203.dt <- Model.dt[which(Model.dt$HBT == "S92000003" & Model.dt$Specialty == "Z9"), ]
+
+imp.Model.8030.dt <- Model.dt[which(Model.dt$HBT == "S08000030" & Model.dt$Specialty == "Z9"), ]
+
+
+p7_1 <- ggplot(data = imp.Model.9203.dt, aes(x = MonthEnding, y = NumberWaiting))+
+      geom_line(size=1) + 
+      labs(x = "Month ending", y = "number waiting", 
+           title = "the number of ongoing waits after imputing NAs in HB S92000003",
+           subtitle = "PHSScotland, 31 October 2012 to 31 December 2021")+
+      theme_bw() +
+      scale_x_date(date_breaks = "9 months", 
+                   date_labels = "%b-%y") +
+      theme(legend.position = "bottom",
+            legend.key.size = unit(10, "pt"),
+            axis.text.x = element_text(angle = 45,size=10),
+            panel.grid.major.x=element_blank(),
+            panel.grid.minor.x=element_blank(),
+            panel.border = element_blank()) 
+
+p7_1
+
+
+p7_2 <- ggplot(data = imp.Model.8030.dt, aes(x = MonthEnding, y = NumberWaiting))+
+      geom_line(size=1, color = 4) +
+      labs(x = "Month ending", y = "number waiting", 
+           title = "the number of ongoing waits after imputing NAs in HB S08000030",
+           subtitle = "PHSScotland, 31 October 2012 to 31 December 2021")+
+      theme_bw() +
+      scale_x_date(date_breaks = "9 months", 
+                   date_labels = "%b-%y") +
+      theme(legend.position = "bottom",
+            legend.key.size = unit(10, "pt"),
+            axis.text.x = element_text(angle = 45,size=10),
+            panel.grid.major.x=element_blank(),
+            panel.grid.minor.x=element_blank(),
+            panel.border = element_blank()) 
+
+p7_2
+```
+
+```{r}
+
+p8_1 <- ggplot()+
+      geom_line(data = imp.Model.8030.dt, 
+                aes(x = MonthEnding, y = Additions, 
+                    colour = "Additions"), size=1)+
+      geom_line(data = imp.Model.8030.dt,
+                aes(x = MonthEnding,
+                    y = Removals,
+                    colour ="Removals"), size=1) + 
+      scale_colour_manual("",values = c("Additions" = "black",
+                                        "Removals" = "light blue")) +
+      theme_bw() + 
+      scale_x_date(date_breaks = "9 months", 
+                   date_labels = "%b-%y") +
+      labs(x = "Month ending", y = "total number of patients",
+           title = "Number of additions and removals after imputing NAs in HB S08000030",
+           subtitle = "PHSScotland, 31 December 2012 to 31 December 2021")+
+        theme(legend.position = "bottom",
+              panel.grid.major.x=element_blank(),
+              panel.grid.minor.x=element_blank(),
+              panel.border = element_blank())
+p8_1
+
+
+
+
+p8_2 <- ggplot()+
+      geom_line(data = imp.Model.9203.dt, 
+                aes(x = MonthEnding, y = Additions, 
+                    colour = "Additions"), size=1)+
+      geom_line(data = imp.Model.9203.dt,
+                aes(x = MonthEnding,
+                    y = Removals,
+                    colour ="Removals"), size=1) + 
+      scale_colour_manual("",values = c("Additions" = "orange",
+                                        "Removals" = "blue")) +
+      theme_bw() + 
+      scale_x_date(date_breaks = "9 months", 
+                   date_labels = "%b-%y") +
+      labs(x = "Month ending", y = "total number of patients",
+           title = "Number of additions and removals after imputing NAs in HB S92000003",
+           subtitle = "PHSScotland, 31 December 2012 to 31 December 2021")+
+        theme(legend.position = "bottom",
+              panel.grid.major.x=element_blank(),
+              panel.grid.minor.x=element_blank(),
+              panel.border = element_blank())
+p8_2
+
+```
+
+```{r}
+library(faraway)
+# build model
+Model1.dt <- Model.dt
+
+# model 1: a basic glm poisson model 
+# fold.zone (urban) should be factor
+Model1.dt$fold.zone <- as.factor(round(Model1.dt$fold.zone))
+Model1.dt$Qt <- as.factor(Model1.dt$Qt)
+Model1.dt$Year <- as.numeric(Model1.dt$Year)-2012+1
+Model1.dt$HBT <- as.factor(Model1.dt$HBT)
+Model1.dt$Specialty <- as.factor(Model1.dt$Specialty)
+Model1.dt$Additions <- as.integer(Model1.dt$Additions)
+Model1.dt$Removals <- as.integer(Model1.dt$Removals)
+Model1.dt$NumberWaiting <- as.integer(Model1.dt$NumberWaiting)
+
+
+A_R <- Model1.dt$Additions - Model1.dt$Removals
+Model2.dt <- cbind(Model1.dt, A_R) %>% unite("Match", c("HBT", "Specialty"), sep="-", remove = F)
+
+
+
+str(Model2.dt)
+
+
+modp <- glm(NumberWaiting ~ old.prop + F.old.prop + Year + Qt + HBT + Specialty + A_R, family = poisson(link = log), Model2.dt)
+
+
+summary(modp)
+
+c(deviance(modp),df.residual(modp))
+
+
+halfnorm(residuals(modp))
+
+dp<-sum(residuals(modp,type="pearson")^2)/modp$df.res
+dp
+```
+
+```{r}
+plot(log(fitted(modp)),log((Model2.dt$NumberWaiting-fitted(modp))^2),xlab=expression(hat(mu)),ylab=expression((y-hat(mu))^2))
+abline(0,1)
+```
+
+```{r}
+modp2 <- glm(NumberWaiting ~ old.prop + F.old.prop + Year + Qt + A_R + Specialty + HBT + fold.zone, family = poisson(link = log), Model2.dt)
+summary(modp2)
+```
+
+```{r}
+# model 2: Zero Inflated Count Models
+
+Model3.dt <- Model2.dt
+Model3.dt$A_R <- scale(Model3.dt$A_R)
+Model3.dt$Year <- scale(Model3.dt$Year)
+Model3.dt$old.prop <- scale(Model3.dt$old.prop)
+Model3.dt$F.old.prop <- scale(Model3.dt$F.old.prop)
+
+
+
+library(lme4)
+modgh <- glmer(NumberWaiting ~ A_R + old.prop + F.old.prop + Year + Qt + (1 | HBT) + (1| Specialty), family=poisson(link = log), data = Model3.dt, nAGQ = 0)
+
+
+```
+
+```{r}
+summary(modgh)
+```
+
+```{r}
+sum(residuals(modgh,type="pearson")^2)/df.residual(modgh)
+```
+
+```{r}
+halfnorm(residuals(modgh))
+plot(log(fitted(modgh)),log((Model3.dt$NumberWaiting-fitted(modgh))^2),xlab=expression(hat(mu)),ylab=expression((y-hat(mu))^2))
+abline(0,1)
+```
+
+```{r}
+# caterpillar plot
+library(lattice)
+d1 <- ranef(modgh, condVar = TRUE)
+a <- dotplot(d1)[["HBT"]]
+b <- dotplot(d1)[["Specialty"]]
+
+#grid.arrange combines your plots
+library(gridExtra)
+grid.arrange(a,b, nrow=1) 
+```
+
+```{r}
+# model 3: GLMM with HB and Specialty as random effects
+library(glmmTMB)
+fit_zipoisson <- glmmTMB(NumberWaiting ~ A_R + old.prop + F.old.prop + Year + Qt + (1 | HBT) + + (1 | Specialty), data = Model2.dt, ziformula = ~ 1, family = poisson)
+
+
+summary(fit_zipoisson)
+```
+
+```{r}
+# caterpillar plot
+df.residual(fit_zipoisson)
+```
+
+```{r}
+halfnorm(residuals(fit_zipoisson))
+plot(log(fitted(fit_zipoisson)),log((Model3.dt$NumberWaiting-fitted(modgh))^2),xlab=expression(hat(mu)),ylab=expression((y-hat(mu))^2))
+abline(0,1)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
